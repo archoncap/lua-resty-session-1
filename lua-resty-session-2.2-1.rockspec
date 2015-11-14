@@ -1,16 +1,16 @@
 package = "lua-resty-session"
-version = "2.1-1"
+version = "2.2-1"
 -- LuaDist source
 source = {
-  tag = "2.1-1",
+  tag = "2.2-1",
   url = "git://github.com/ld-test/lua-resty-session.git"
 }
 -- source = {
 --     url = "git://github.com/bungle/lua-resty-session.git",
---     branch = "v2.1"
+--     branch = "v2.2"
 -- }
 description = {
-    summary = "Session library for OpenResty implementing Secure Cookie Protocol",
+    summary = "Session library for OpenResty – flexible and secure",
     detailed = "lua-resty-session is a secure, and flexible session library for OpenResty.",
     homepage = "https://github.com/bungle/lua-resty-session",
     maintainer = "Aapo Talvensaari <aapo.talvensaari@gmail.com>",
