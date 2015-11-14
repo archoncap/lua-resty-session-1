@@ -1,6 +1,7 @@
 local base64enc   = ngx.encode_base64
 local base64dec   = ngx.decode_base64
 local ngx_var     = ngx.var
+local ngx_header  = ngx.header
 local concat      = table.concat
 local hmac        = ngx.hmac_sha1
 local time        = ngx.time
@@ -78,7 +79,7 @@ function setcookie(session, value, expires)
         cookie[#cookie + 1] = "; Expires="
         cookie[#cookie + 1] = cookie_time(session.expires)
     end
-    if domain ~= "localhost" then
+    if domain ~= "localhost" and domain ~= "" then
         cookie[#cookie + 1] = "; Domain="
         cookie[#cookie + 1] = domain
     end
@@ -92,7 +93,7 @@ function setcookie(session, value, expires)
     end
     local needle = concat(cookie, nil, 1, 2)
     cookie = concat(cookie)
-    local cookies = ngx.header["Set-Cookie"]
+    local cookies = ngx_header["Set-Cookie"]
     local t = type(cookies)
     if t == "table" then
         local found = false
@@ -111,7 +112,7 @@ function setcookie(session, value, expires)
     else
         cookies = cookie
     end
-    ngx.header["Set-Cookie"] = cookies
+    ngx_header["Set-Cookie"] = cookies
     return true
 end
 
@@ -126,7 +127,9 @@ local function getcookie(cookie)
         s, e = cookie:find("|", p, true)
     end
     r[4] = cookie:sub(p)
-    return decode(r[1]), tonumber(r[2]), decode(r[3]), decode(r[4])
+    if r[1] and r[2] and r[3] and r[4] then
+      return decode(r[1]), tonumber(r[2]), decode(r[3]), decode(r[4])
+    end
 end
 
 local persistent = enabled(ngx_var.session_cookie_persistent or false)
@@ -156,7 +159,7 @@ local defaults = {
 defaults.secret = ngx_var.session_secret or random(defaults.cipher.size / 8)
 
 local session = {
-    _VERSION = "1.5"
+    _VERSION = "1.6-dev"
 }
 session.__index = session
 
@@ -199,26 +202,53 @@ end
 
 function session.start(opts)
     local self = session.new(opts)
+    local scheme = ngx_header["X-Forwarded-Proto"]
     if self.cookie.secure == nil then
-        self.cookie.secure = ngx_var.https == "on"
+        if scheme then
+            self.cookie.secure = scheme == "https"
+        else
+            self.cookie.secure = ngx_var.https == "on"
+        end
     end
+    scheme = self.check.scheme and (scheme or ngx_var.scheme or "") or ""
     if self.cookie.domain == nil then
         self.cookie.domain = ngx_var.host
+    end
+    local addr = ""
+    if self.check.addr then
+        addr = ngx_header["CF-Connecting-IP"] or
+               ngx_header["Fastly-Client-IP"] or
+               ngx_header["Incap-Client-IP"]  or
+               ngx_header["X-Real-IP"]
+        if not addr then
+            addr = ngx_header["X-Forwarded-For"]
+            if addr then
+                -- We shouldn't really get the left-most address, because of spoofing,
+                -- but this is better handled with a module, like nginx realip module,
+                -- anyway (see also: http://goo.gl/Z6u2oR).
+                local s = (addr:find(',', 1, true))
+                if s then
+                    addr = addr:sub(1, s - 1)
+                end
+            else
+                addr = ngx_var.remote_addr
+            end
+        end
     end
     self.key = concat{
         self.check.ssi    and (ngx_var.ssl_session_id  or "") or "",
         self.check.ua     and (ngx_var.http_user_agent or "") or "",
-        self.check.addr   and (ngx_var.remote_addr     or "") or "",
-        self.check.scheme and (ngx_var.scheme          or "") or ""
+        addr,
+        scheme
     }
-    local now, i, e, d, h = time(), getcookie(ngx.var["cookie_" .. self.name])
+    local now, i, e, d, h = time(), getcookie(ngx_var["cookie_" .. self.name])
     if i and e and e > now then
         self.id = i
         self.expires = e
         local k = hmac(self.secret, self.id .. self.expires)
         local a = aes:new(k, self.id, aes.cipher(self.cipher.size, self.cipher.mode), self.cipher.hash, self.cipher.rounds)
         d = a:decrypt(d)
-        if d and hmac(k, self.id .. self.expires .. d .. self.key) == h then
+        if d and hmac(k, concat{ self.id, self.expires, d, self.key }) == h then
             local data = json.decode(d)
             if type(data) == "table" then
                 self.data = data
@@ -244,9 +274,9 @@ function session:save()
     self.expires = time() + self.cookie.lifetime
     local k = hmac(self.secret, self.id .. self.expires)
     local d = json.encode(self.data)
-    local h = hmac(k, self.id .. self.expires .. d .. self.key)
+    local h = hmac(k, concat{ self.id, self.expires, d, self.key })
     local a = aes:new(k, self.id, aes.cipher(self.cipher.size, self.cipher.mode), self.cipher.hash, self.cipher.rounds)
-    return setcookie(self, encode(self.id) .. "|" .. self.expires .. "|" .. encode(a:encrypt(d)) .. "|" .. encode(h))
+    return setcookie(self, concat({ encode(self.id), self.expires, encode(a:encrypt(d)), encode(h) }, "|"))
 end
 
 function session:destroy()
