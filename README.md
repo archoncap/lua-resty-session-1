@@ -277,7 +277,7 @@ with Nginx `set $session_cookie_renew 600;` (600 seconds is the default value).
 `session.cookie.lifetime` holds the cookie lifetime in seconds in the future. By default this is set
 to 3,600 seconds. This can be configured with Nginx `set $session_cookie_lifetime 3600;`. This does not
 set cookie's expiration time on session only (by default) cookies, but it is used if the cookies are
-configured persistent with `session.cookie.persistent == true`.
+configured persistent with `session.cookie.persistent == true`. See also notes about [ssl_session_timeout](#nginx-configuration-variables).
 
 #### string session.cookie.path
 
@@ -324,8 +324,13 @@ want to turn this off, this can be configured with Nginx `set $session_cookie_ht
 
 #### boolean session.check.ssi
 
-`session.check.ssi` is additional check to validate that the request was made with the same SSL Session as when
-the original cookie was delivered. This check is enabled by default on non-persistent sessions and disabled by default on persistent sessions.
+`session.check.ssi` is additional check to validate that the request was made with the same SSL session as when
+the original cookie was delivered. This check is enabled by default on non-persistent sessions and disabled by default on persistent sessions. Please note that on TLS with TLS Tickets enabled, this will be empty )and not used. This is discussed
+on issue #5 (https://github.com/bungle/lua-resty-session/issues/5). You can disable TLS tickets with Nginx configuration:
+
+```nginx
+ssl_session_tickets off;
+```
 
 #### boolean session.check.ua
 
@@ -342,21 +347,33 @@ as where the original cookie was delivered. This check is disabled by default.
 `session.check.scheme` is additional check to validate that the request was made using the same protocol 
 as the one used when the original cookie was delivered. This check is enabled by default.
 
-#### Additional checks that are not configurable
-
-`lua-resty-session` will always check on TLS/SSL connection whether the cookie was send with the same `ssl_session_id`
-that was used when the cookie was originally delivered.
-
 ## Nginx Configuration Variables
 
-You can set default configuration parameters directly from Nginx configuration. It's *IMPORTANT* to understand
+You can set default configuration parameters directly from Nginx configuration. It's **IMPORTANT** to understand
 that these are read only once (not on every request), for performance reasons. This is especially important if
 you run multiple sites (with different configurations) on the same Nginx server. You can of course set the common
 parameters on Nginx configuration even on that case. But if you are really supporting multiple site with different
 configurations (e.g. different `session.secret` on each site), you should set these in code (see: `session.new`
 and `session.start`).
 
-Here is a list of Nginx configuration variables that you can use to control `lua-resty-session`:
+Please note that Nginx has also its own SSL/TLS caches and timeouts. Especially note `ssl_session_timeout` if you are running services over SSL/TLS as this will end sessions regardless of `session.cookie.lifetime`. Please adjust that accordingly or disable `ssl_session_id` check `session.check.ssi = false` (in code) or `set $session_check_ssi off;` (in Nginx configuration).
+
+You may want to add something like this to your Nginx SSL/TLS config (quite a huge cache in this example, 1 MB is about 4000 SSL Sessions):
+
+```nginx
+ssl_session_cache shared:SSL:100m;
+ssl_session_timeout 60m;
+```
+
+Also note that the `ssl_session_id` may be `null` if the TLS tickets are enabled. You can disable tickets in Nginx server with the configuration below:
+
+```nginx
+ssl_session_tickets off;
+```
+
+Right now this is a workaround and may change in a future if we find alternative ways to have the added security that we have with `ssl_session_id` with TLS tickets too. Right not, while TLS tickets are great, they also have effect on (Perfect) Forward Secrecy, and it is adviced to disable tickets until the problems mentioned in [The Sad State of Server-Side TLS Session Resumption Implementations](https://timtaubert.de/blog/2014/11/the-sad-state-of-server-side-tls-session-resumption-implementations/) article are resolved.
+
+Here is a list of lua-resty-session related Nginx configuration variables that you can use to control `lua-resty-session`:
 
 ```nginx
 set $session_name              session;
