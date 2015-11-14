@@ -61,11 +61,11 @@ local function enabled(val)
 end
 
 local function encode(value)
-    return base64enc(value):gsub("[+/=]", ENCODE_CHARS)
+    return (base64enc(value):gsub("[+/=]", ENCODE_CHARS))
 end
 
 local function decode(value)
-    return base64dec(value:gsub("[-_.]", DECODE_CHARS))
+    return base64dec((value:gsub("[-_.]", DECODE_CHARS)))
 end
 
 function setcookie(session, value, expires)
@@ -102,12 +102,8 @@ function setcookie(session, value, expires)
         if not found then
             cookies[#cookies + 1] = cookie
         end
-    elseif t == "string" then
-        if cookies:find(needle, 1, true) == 1 then
-            cookies = cookie
-        else
-            cookies = { cookies, cookie }
-        end
+    elseif t == "string" and cookies:find(needle, 1, true) ~= 1  then
+        cookies = { cookies, cookie }
     else
         cookies = cookie
     end
